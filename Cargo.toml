@@ -16,6 +16,8 @@ esp-println = {version = "0.18.0", features = ["esp32c3", "jtag-serial", "critic
 ens160-aq = "0.2.12"
 embedded-hal-bus = "0.3.0"
 embedded-hal = "1.0.0"
+aht30 = "1.0.1"
+
 
 
 # For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html

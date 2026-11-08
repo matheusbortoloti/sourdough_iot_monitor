@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "aht30"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c1136a37e00bfbec1b6a520dc2d64bc30fe08450ad19ed9df9ff471a665b5f1"
+dependencies = [
+ "embedded-hal 1.0.0",
+ "maybe-async-cfg",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1308,6 +1318,7 @@ dependencies = [
 name = "sourdough_monitor"
 version = "0.1.0"
 dependencies = [
+ "aht30",
  "critical-section",
  "embedded-hal 1.0.0",
  "embedded-hal-bus",
