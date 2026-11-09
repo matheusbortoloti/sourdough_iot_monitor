@@ -7,30 +7,29 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-use esp_hal::ram;
-use esp_hal::delay::Delay;
 use esp_hal::clock::CpuClock;
+use esp_hal::delay::Delay;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
+use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 extern crate alloc;
 use core::cell::RefCell;
 
 use esp_println::println;
 
-use embassy_time::{Instant, Timer, Duration};
+use embassy_time::{Duration, Instant, Timer};
 
 use embassy_executor::Spawner;
 
 use mbedtls_rs::Tls;
 
-
-use sourdough_monitor::sensors::{self};
 use sourdough_monitor::network::Network;
+use sourdough_monitor::sensors::{self};
 
 use sourdough_monitor::cloud::thingspeak::ThingSpeak;
 
-const SAMPLE_INTERVAL_MS: u64 = 10*1000;   /* 10 seconds */
-const UPLOAD_INTERVAL_MS: u64 = 60*1000;  /* 1 minutes */
+const SAMPLE_INTERVAL_MS: u64 = 10 * 1000; /* 10 seconds */
+const UPLOAD_INTERVAL_MS: u64 = 60 * 1000; /* 1 minutes */
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -50,8 +49,6 @@ esp_bootloader_esp_idf::esp_app_desc!();
     clippy::large_stack_frames,
     reason = "it's not unusual to allocate larger buffers etc. in main"
 )]
-
-
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
     let mut delay = Delay::new();
@@ -69,12 +66,7 @@ async fn main(spawner: Spawner) {
     // Start the RTOS scheduler.
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
-    let network = match Network::initialize(
-        peripherals.WIFI,
-        &spawner,
-    )
-    .await
-    {
+    let network = match Network::initialize(peripherals.WIFI, &spawner).await {
         Ok(network) => network,
         Err(error) => {
             println!("FATAL: {}", error);
@@ -87,7 +79,7 @@ async fn main(spawner: Spawner) {
         loop {}
     }
 
-    let rng = sourdough_monitor::cloud::crypto_rng::initialize_tls_rng(); 
+    let rng = sourdough_monitor::cloud::crypto_rng::initialize_tls_rng();
 
     let tls = match Tls::new(rng) {
         Ok(tls) => {
@@ -100,12 +92,10 @@ async fn main(spawner: Spawner) {
         }
     };
 
-
     let thingspeak = ThingSpeak::new(network.stack());
     let (rx_buffer, tx_buffer) = ThingSpeak::initialize_buffers();
 
     println!("Connecting to ThingSpeak...");
-
 
     let i2c = I2c::new(peripherals.I2C0, I2cConfig::default())
         .unwrap()
@@ -133,10 +123,9 @@ async fn main(spawner: Spawner) {
             println!("FATAL: Could not establish VL6180X reference: {:?}", error);
             halt();
         }
-}
+    }
     let mut next_sample = Instant::now();
-    let mut next_upload =
-        next_sample + Duration::from_millis(UPLOAD_INTERVAL_MS);
+    let mut next_upload = next_sample + Duration::from_millis(UPLOAD_INTERVAL_MS);
 
     // Keep the latest successful sensor readings.
     let mut latest_readings: Option<(i16, f32, f32, u16)> = None;

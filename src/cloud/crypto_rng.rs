@@ -35,10 +35,7 @@ impl rand_core::TryRng for EspHardwareRng {
         Ok((high << 32) | low)
     }
 
-    fn try_fill_bytes(
-        &mut self,
-        dest: &mut [u8],
-    ) -> Result<(), Self::Error> {
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
         self.rng.read(dest);
         Ok(())
     }

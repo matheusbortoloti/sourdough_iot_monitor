@@ -1,5 +1,5 @@
-use embedded_hal::i2c::I2c;
 use embedded_hal::delay::DelayNs;
+use embedded_hal::i2c::I2c;
 
 const VL6180X_ADDRESS: u8 = 0x29;
 
@@ -35,7 +35,6 @@ pub enum Vl6180xMeasurementError<E> {
     ReferenceNotEstablished,
 }
 
-
 pub struct Vl6180x<I2C> {
     i2c: I2C,
     reference_distance_mm: Option<u8>,
@@ -44,14 +43,13 @@ pub struct Vl6180x<I2C> {
 
 impl<I2C> Vl6180x<I2C> {
     pub fn new(i2c: I2C) -> Self {
-    Self {
-        i2c,
-        reference_distance_mm: None,
-        moving_average: MovingAverage::new(),
+        Self {
+            i2c,
+            reference_distance_mm: None,
+            moving_average: MovingAverage::new(),
+        }
     }
 }
-}
-
 
 struct MovingAverage {
     samples: [i16; MOVING_AVERAGE_WINDOW],
@@ -83,8 +81,7 @@ impl MovingAverage {
         self.sum += new_sample as i32;
 
         // Advance the circular buffer index.
-        self.next_index =
-            (self.next_index + 1) % MOVING_AVERAGE_WINDOW;
+        self.next_index = (self.next_index + 1) % MOVING_AVERAGE_WINDOW;
 
         // Calculate the average.
         (self.sum / self.count as i32) as i16
@@ -98,31 +95,19 @@ impl MovingAverage {
     }
 }
 
-
-fn read_register<I2C>(
-    i2c: &mut I2C,
-    register: u16,
-) -> Result<u8, I2C::Error>
+fn read_register<I2C>(i2c: &mut I2C, register: u16) -> Result<u8, I2C::Error>
 where
     I2C: I2c,
 {
     let register_address = register.to_be_bytes();
     let mut value = [0u8; 1];
 
-    i2c.write_read(
-        VL6180X_ADDRESS,
-        &register_address,
-        &mut value,
-    )?;
+    i2c.write_read(VL6180X_ADDRESS, &register_address, &mut value)?;
 
     Ok(value[0])
 }
 
-fn write_register<I2C>(
-    i2c: &mut I2C,
-    register: u16,
-    value: u8,
-) -> Result<(), I2C::Error>
+fn write_register<I2C>(i2c: &mut I2C, register: u16, value: u8) -> Result<(), I2C::Error>
 where
     I2C: I2c,
 {
@@ -130,33 +115,23 @@ where
 
     i2c.write(
         VL6180X_ADDRESS,
-        &[
-            register_address[0],
-            register_address[1],
-            value,
-        ],
+        &[register_address[0], register_address[1], value],
     )
 }
 
-
-pub fn initialize_sensor<I2C>(
-    i2c: &mut I2C,
-) -> Result<(), Vl6180xInitError<I2C::Error>>
+pub fn initialize_sensor<I2C>(i2c: &mut I2C) -> Result<(), Vl6180xInitError<I2C::Error>>
 where
     I2C: I2c,
 {
-    let model_id = read_register(i2c, MODEL_ID_REGISTER)
-        .map_err(Vl6180xInitError::Communication)?;
+    let model_id =
+        read_register(i2c, MODEL_ID_REGISTER).map_err(Vl6180xInitError::Communication)?;
 
     if model_id != EXPECTED_MODEL_ID {
-        return Err(
-            Vl6180xInitError::UnexpectedModelId(model_id)
-        );
+        return Err(Vl6180xInitError::UnexpectedModelId(model_id));
     }
 
     let fresh_out_of_reset =
-        read_register(i2c, FRESH_OUT_OF_RESET_REGISTER)
-            .map_err(Vl6180xInitError::Communication)?;
+        read_register(i2c, FRESH_OUT_OF_RESET_REGISTER).map_err(Vl6180xInitError::Communication)?;
 
     if fresh_out_of_reset == 1 {
         const INITIALIZATION_REGISTERS: &[(u16, u8)] = &[
@@ -193,8 +168,7 @@ where
         ];
 
         for &(register, value) in INITIALIZATION_REGISTERS {
-            write_register(i2c, register, value)
-                .map_err(Vl6180xInitError::Communication)?;
+            write_register(i2c, register, value).map_err(Vl6180xInitError::Communication)?;
         }
 
         write_register(i2c, FRESH_OUT_OF_RESET_REGISTER, 0)
@@ -321,11 +295,7 @@ where
     where
         D: DelayNs,
     {
-        let distance = read_distance_mm(
-            &mut self.i2c,
-            delay,
-            timeout_ms,
-        )?;
+        let distance = read_distance_mm(&mut self.i2c, delay, timeout_ms)?;
 
         self.moving_average.reset();
         self.reference_distance_mm = Some(distance);
@@ -344,17 +314,11 @@ where
         let reference = match self.reference_distance_mm {
             Some(distance) => distance,
             None => {
-                return Err(
-                    Vl6180xMeasurementError::ReferenceNotEstablished
-                );
+                return Err(Vl6180xMeasurementError::ReferenceNotEstablished);
             }
         };
 
-        let current_distance = read_distance_mm(
-            &mut self.i2c,
-            delay,
-            timeout_ms,
-        )?;
+        let current_distance = read_distance_mm(&mut self.i2c, delay, timeout_ms)?;
 
         let relative_height = reference as i16 - current_distance as i16;
 

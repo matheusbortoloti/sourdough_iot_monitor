@@ -1,20 +1,16 @@
 //! Wi-Fi and network connectivity management.
+use core::fmt;
 use embassy_executor::Spawner;
-use embassy_time::{with_timeout, Duration};
 use embassy_net::{Runner, Stack, StackResources};
-use static_cell::StaticCell;
+use embassy_time::{Duration, with_timeout};
+use esp_hal::peripherals::WIFI;
+use esp_println::println;
 use esp_radio::wifi::{
-    Interface,
-    AuthenticationMethodConfig,
-    Config as WifiConfig,
-    WifiController,
-    scan::ScanConfig,
+    AuthenticationMethodConfig, Config as WifiConfig, Interface, WifiController, scan::ScanConfig,
     sta::StationConfig,
 };
-use esp_hal::peripherals::WIFI;
 use esp_radio::wifi::{ConnectionError, WifiError};
-use core::fmt;
-use esp_println::println;
+use static_cell::StaticCell;
 
 pub struct Network {
     _controller: WifiController<'static>,
@@ -61,7 +57,6 @@ impl fmt::Display for NetworkError {
 const WIFI_SSID: &str = env!("WIFI_SSID");
 const WIFI_PASSWORD: &str = env!("WIFI_PASSWORD");
 
-
 #[embassy_executor::task]
 async fn net_task(mut runner: Runner<'static, Interface>) {
     runner.run().await
@@ -86,15 +81,12 @@ impl Network {
         println!("Waiting for DHCP...");
 
         // Wait up to 30 seconds for network configuration.
-        with_timeout(
-            Duration::from_secs(30),
-            self.stack.wait_config_up(),
-        )
-        .await
-        .map_err(|_| {
-            println!("DHCP configuration timed out!");
-            NetworkError::DhcpTimeout
-        })?;
+        with_timeout(Duration::from_secs(30), self.stack.wait_config_up())
+            .await
+            .map_err(|_| {
+                println!("DHCP configuration timed out!");
+                NetworkError::DhcpTimeout
+            })?;
 
         println!("Network configured successfully!");
 
@@ -115,10 +107,7 @@ pub async fn connect(
     wifi_peripheral: esp_hal::peripherals::WIFI<'static>,
 ) -> Result<WifiController<'static>, NetworkError> {
     // Initialize the Wi-Fi controller.
-    let mut controller = match WifiController::new(
-        wifi_peripheral,
-        Default::default(),
-    ) {
+    let mut controller = match WifiController::new(wifi_peripheral, Default::default()) {
         Ok(controller) => {
             println!("Wi-Fi controller initialized successfully!");
             controller
@@ -140,8 +129,7 @@ pub async fn connect(
             for access_point in access_points {
                 println!(
                     "SSID: {:?}, Signal: {} dBm",
-                    access_point.ssid,
-                    access_point.signal_strength
+                    access_point.ssid, access_point.signal_strength
                 );
             }
         }
@@ -164,9 +152,7 @@ pub async fn connect(
     let station_config = WifiConfig::Station(
         StationConfig::default()
             .with_ssid(ssid)
-            .with_authentication(
-                AuthenticationMethodConfig::Wpa2Personal(password),
-            ),
+            .with_authentication(AuthenticationMethodConfig::Wpa2Personal(password)),
     );
 
     match controller.set_config(&station_config) {
@@ -192,17 +178,12 @@ pub async fn connect(
     Ok(controller)
 }
 
-pub fn start_network(
-    spawner: &Spawner,
-) -> Result<Stack<'static>, NetworkError> {
+pub fn start_network(spawner: &Spawner) -> Result<Stack<'static>, NetworkError> {
     // Create the Wi-Fi station network interface.
     let wifi_interface = Interface::station();
 
     println!("Wi-Fi station interface created!");
-    println!(
-        "Station MAC address: {:02X?}",
-        wifi_interface.mac_address()
-    );
+    println!("Station MAC address: {:02X?}", wifi_interface.mac_address());
 
     // Configure DHCP.
     let net_config = embassy_net::Config::dhcpv4(Default::default());
@@ -214,17 +195,10 @@ pub fn start_network(
     // Generate a random seed using the ESP32-C3 hardware RNG.
     let rng = esp_hal::rng::Rng::new();
 
-    let random_seed =
-        (u64::from(rng.random()) << 32) |
-        u64::from(rng.random());
+    let random_seed = (u64::from(rng.random()) << 32) | u64::from(rng.random());
 
     // Create the network stack and background runner.
-    let (stack, runner) = embassy_net::new(
-        wifi_interface,
-        net_config,
-        resources,
-        random_seed,
-    );
+    let (stack, runner) = embassy_net::new(wifi_interface, net_config, resources, random_seed);
 
     println!("Embassy Net stack created!");
 

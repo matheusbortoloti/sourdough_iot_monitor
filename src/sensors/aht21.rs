@@ -1,9 +1,6 @@
-use embedded_hal::{
-    delay::DelayNs,
-    i2c::I2c,
-};
+use embedded_hal::{delay::DelayNs, i2c::I2c};
 
-use aht30::{Aht20, AHT20_DEFAULT_ADDR};
+use aht30::{AHT20_DEFAULT_ADDR, Aht20};
 
 #[derive(Debug)]
 pub struct Aht21Measurements {
@@ -29,9 +26,7 @@ where
     Aht20::new(AHT20_DEFAULT_ADDR, i2c, delay)
 }
 
-pub fn initialize<I2C, D>(
-    sensor: &mut Aht20<I2C, D>,
-) -> Result<(), Aht21InitError>
+pub fn initialize<I2C, D>(sensor: &mut Aht20<I2C, D>) -> Result<(), Aht21InitError>
 where
     I2C: I2c,
     D: DelayNs,

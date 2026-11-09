@@ -3,12 +3,12 @@ use core::cell::RefCell;
 use aht30::Aht20;
 use embedded_hal::i2c::I2c;
 use embedded_hal_bus::i2c::RefCellDevice;
-use esp_hal::delay::Delay;
 use ens160_aq::Ens160;
+use esp_hal::delay::Delay;
 
 pub mod aht21;
-pub mod vl6180x;
 pub mod ens160;
+pub mod vl6180x;
 
 type Vl6180xDriver<'a, I2C> = vl6180x::Vl6180x<RefCellDevice<'a, I2C>>;
 type Ens160Driver<'a, I2C> = Ens160<RefCellDevice<'a, I2C>, Delay>;
@@ -43,41 +43,28 @@ pub struct InitializedSensors<Vl6180xDriver, Ens160Driver, Aht21Driver> {
 pub fn initialize<'a, I2C>(
     i2c_bus: &'a RefCell<I2C>,
 ) -> Result<
-    InitializedSensors<
-        Vl6180xDriver<'a, I2C>,
-        Ens160Driver<'a, I2C>,
-        Aht21Driver<'a, I2C>,
-    >,
+    InitializedSensors<Vl6180xDriver<'a, I2C>, Ens160Driver<'a, I2C>, Aht21Driver<'a, I2C>>,
     SensorInitError<I2C::Error>,
 >
 where
     I2C: I2c,
 {
     // 1. Initialize VL6180X
-    let mut vl6180x_driver =
-    vl6180x::Vl6180x::new(RefCellDevice::new(i2c_bus));
+    let mut vl6180x_driver = vl6180x::Vl6180x::new(RefCellDevice::new(i2c_bus));
 
     vl6180x_driver
         .initialize()
         .map_err(SensorInitError::Vl6180x)?;
 
     // 2. Initialize ENS160
-    let mut ens160 = ens160::new(
-        RefCellDevice::new(i2c_bus),
-        Delay::new(),
-    );
+    let mut ens160 = ens160::new(RefCellDevice::new(i2c_bus), Delay::new());
 
-    ens160::initialize(&mut ens160)
-        .map_err(SensorInitError::Ens160)?;
+    ens160::initialize(&mut ens160).map_err(SensorInitError::Ens160)?;
 
     // 3. Initialize AHT21
-    let mut aht21 = aht21::new(
-        RefCellDevice::new(i2c_bus),
-        Delay::new(),
-    );
+    let mut aht21 = aht21::new(RefCellDevice::new(i2c_bus), Delay::new());
 
-    aht21::initialize(&mut aht21)
-        .map_err(SensorInitError::Aht21)?;
+    aht21::initialize(&mut aht21).map_err(SensorInitError::Aht21)?;
 
     // 4. Return initialized drivers
     Ok(InitializedSensors {
@@ -99,17 +86,11 @@ where
     I2C: I2c,
 {
     let aht21 =
-        aht21::get_measurements(&mut sensors.aht21)
-            .map_err(SensorMeasurementError::Aht21)?;
+        aht21::get_measurements(&mut sensors.aht21).map_err(SensorMeasurementError::Aht21)?;
 
     let ens160 =
-        ens160::get_measurements(
-            &mut sensors.ens160,
-            2000,
-            aht21.temperature,
-            aht21.humidity,
-        )
-        .map_err(SensorMeasurementError::Ens160)?;
+        ens160::get_measurements(&mut sensors.ens160, 2000, aht21.temperature, aht21.humidity)
+            .map_err(SensorMeasurementError::Ens160)?;
 
     let relative_height_mm = sensors
         .vl6180x

@@ -1,13 +1,10 @@
-use embedded_hal::{
-    delay::DelayNs,
-    i2c::I2c,
-};
+use embedded_hal::{delay::DelayNs, i2c::I2c};
 
+use ens160_aq::Ens160;
 use esp_hal::{
     delay::Delay,
     time::{Duration, Instant},
 };
-use ens160_aq::Ens160;
 
 #[derive(Debug)]
 pub enum Ens160InitError<E> {
@@ -21,7 +18,6 @@ pub enum Ens160MeasurementError<E> {
     Driver(ens160_aq::error::Error<E>),
 }
 
-
 pub fn new<I2C, D>(i2c: I2C, delay: D) -> Ens160<I2C, D>
 where
     I2C: I2c,
@@ -30,9 +26,7 @@ where
     Ens160::new_secondary_address(i2c, delay) // Necessary when ENS160 is configured to use I2C address 0x53
 }
 
-pub fn initialize<I2C, D>(
-    sensor: &mut Ens160<I2C, D>,
-) -> Result<(), Ens160InitError<I2C::Error>>
+pub fn initialize<I2C, D>(sensor: &mut Ens160<I2C, D>) -> Result<(), Ens160InitError<I2C::Error>>
 where
     I2C: I2c,
     D: DelayNs,
@@ -43,7 +37,6 @@ where
         Err(error) => Err(Ens160InitError::Driver(error)),
     }
 }
-
 
 pub fn get_measurements<I2C, D>(
     sensor: &mut Ens160<I2C, D>,
@@ -81,4 +74,3 @@ where
         delay.delay_ms(50);
     }
 }
-

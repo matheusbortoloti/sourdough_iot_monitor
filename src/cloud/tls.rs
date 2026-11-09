@@ -2,12 +2,7 @@
 
 use core::ffi::CStr;
 
-use mbedtls_rs::{
-    AuthMode,
-    Certificate,
-    ClientSessionConfig,
-    X509,
-};
+use mbedtls_rs::{AuthMode, Certificate, ClientSessionConfig, X509};
 
 pub fn client_config() -> Option<ClientSessionConfig<'static>> {
     let pem = CStr::from_bytes_with_nul(
@@ -21,8 +16,7 @@ pub fn client_config() -> Option<ClientSessionConfig<'static>> {
 
     let ca = Certificate::new(X509::PEM(pem)).ok()?;
 
-    let server_name =
-        CStr::from_bytes_with_nul(b"api.thingspeak.com\0").unwrap();
+    let server_name = CStr::from_bytes_with_nul(b"api.thingspeak.com\0").unwrap();
 
     Some(ClientSessionConfig {
         ca_chain: Some(ca),

@@ -1,13 +1,13 @@
 //! ThingSpeak HTTPS communication.
 
+use core::fmt::{self, Write as FmtWrite};
+use embassy_net::IpEndpoint;
 use embassy_net::Stack;
 use embassy_net::tcp::TcpSocket;
-use embassy_net::IpEndpoint;
+use esp_println::println;
+use mbedtls_rs::io::Write;
 use mbedtls_rs::{Session, SessionConfig, Tls};
 use static_cell::StaticCell;
-use esp_println::println;
-use core::fmt::{self, Write as FmtWrite};
-use mbedtls_rs::io::Write;
 
 const THINGSPEAK_WRITE_API_KEY: &str = env!("THINGSPEAK_WRITE_API_KEY");
 
@@ -49,8 +49,7 @@ impl<const N: usize> FixedBuffer<N> {
     }
 
     fn as_str(&self) -> Result<&str, ThingSpeakError> {
-        core::str::from_utf8(self.as_bytes())
-            .map_err(|_| ThingSpeakError::InvalidResponse)
+        core::str::from_utf8(self.as_bytes()).map_err(|_| ThingSpeakError::InvalidResponse)
     }
 }
 
@@ -77,10 +76,7 @@ impl ThingSpeak {
     pub async fn resolve_server(&self) -> Result<embassy_net::IpAddress, embassy_net::dns::Error> {
         let addresses = self
             .stack
-            .dns_query(
-                "api.thingspeak.com",
-                embassy_net::dns::DnsQueryType::A,
-            )
+            .dns_query("api.thingspeak.com", embassy_net::dns::DnsQueryType::A)
             .await?;
 
         addresses
@@ -94,18 +90,11 @@ impl ThingSpeak {
         rx_buffer: &'a mut [u8],
         tx_buffer: &'a mut [u8],
     ) -> Result<TcpSocket<'a>, ThingSpeakError> {
-        let mut socket = TcpSocket::new(
-            self.stack,
-            rx_buffer,
-            tx_buffer,
-        );
+        let mut socket = TcpSocket::new(self.stack, rx_buffer, tx_buffer);
 
         socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
 
-        let address = self
-            .resolve_server()
-            .await
-            .map_err(ThingSpeakError::Dns)?;
+        let address = self.resolve_server().await.map_err(ThingSpeakError::Dns)?;
 
         socket
             .connect(IpEndpoint::new(address, 443))
@@ -115,14 +104,8 @@ impl ThingSpeak {
         Ok(socket)
     }
 
-    pub fn initialize_buffers() -> (
-        &'static mut [u8; 4096],
-        &'static mut [u8; 4096],
-    ) {
-        (
-            TCP_RX_BUFFER.init([0; 4096]),
-            TCP_TX_BUFFER.init([0; 4096]),
-        )
+    pub fn initialize_buffers() -> (&'static mut [u8; 4096], &'static mut [u8; 4096]) {
+        (TCP_RX_BUFFER.init([0; 4096]), TCP_TX_BUFFER.init([0; 4096]))
     }
 
     pub async fn establish_tls(
@@ -133,27 +116,19 @@ impl ThingSpeak {
     ) -> Result<(), ThingSpeakError> {
         let socket = self.connect(rx_buffer, tx_buffer).await?;
 
-        let client_config = crate::cloud::tls::client_config()
-            .ok_or(ThingSpeakError::TlsConfig)?;
+        let client_config = crate::cloud::tls::client_config().ok_or(ThingSpeakError::TlsConfig)?;
 
         let config = SessionConfig::Client(client_config);
 
         println!("Heap before TLS session creation:");
         println!("{}", esp_alloc::HEAP.stats());
 
-        let mut session = Session::new(
-            tls.reference(),
-            socket,
-            &config,
-        )
-        .map_err(ThingSpeakError::Tls)?;
+        let mut session =
+            Session::new(tls.reference(), socket, &config).map_err(ThingSpeakError::Tls)?;
 
         println!("TLS session created successfully.");
 
-        session
-            .connect()
-            .await
-            .map_err(ThingSpeakError::Tls)?;
+        session.connect().await.map_err(ThingSpeakError::Tls)?;
 
         println!("TLS handshake successful!");
         println!("Heap after TLS handshake:");
@@ -161,7 +136,6 @@ impl ThingSpeak {
 
         Ok(())
     }
-
 
     pub async fn upload_measurements(
         &self,
@@ -173,25 +147,16 @@ impl ThingSpeak {
         rx_buffer: &mut [u8],
         tx_buffer: &mut [u8],
     ) -> Result<u32, ThingSpeakError> {
-
         let socket = self.connect(rx_buffer, tx_buffer).await?;
 
-        let client_config = crate::cloud::tls::client_config()
-            .ok_or(ThingSpeakError::TlsConfig)?;
+        let client_config = crate::cloud::tls::client_config().ok_or(ThingSpeakError::TlsConfig)?;
 
         let config = SessionConfig::Client(client_config);
 
-        let mut session = Session::new(
-            tls.reference(),
-            socket,
-            &config,
-        )
-        .map_err(ThingSpeakError::Tls)?;
+        let mut session =
+            Session::new(tls.reference(), socket, &config).map_err(ThingSpeakError::Tls)?;
 
-        session
-            .connect()
-            .await
-            .map_err(ThingSpeakError::Tls)?;
+        session.connect().await.map_err(ThingSpeakError::Tls)?;
 
         println!("ThingSpeak TLS handshake successful!");
 
@@ -201,11 +166,7 @@ impl ThingSpeak {
         write!(
             &mut body,
             "api_key={}&field1={}&field2={:.2}&field3={:.2}&field4={}",
-            THINGSPEAK_WRITE_API_KEY,
-            relative_height_mm,
-            temperature,
-            humidity,
-            tvoc_ppb,
+            THINGSPEAK_WRITE_API_KEY, relative_height_mm, temperature, humidity, tvoc_ppb,
         )
         .map_err(|_| ThingSpeakError::RequestBuffer)?;
 
@@ -234,10 +195,7 @@ impl ThingSpeak {
             .await
             .map_err(ThingSpeakError::Tls)?;
 
-        session
-            .flush()
-            .await
-            .map_err(ThingSpeakError::Tls)?;
+        session.flush().await.map_err(ThingSpeakError::Tls)?;
 
         println!("ThingSpeak POST request sent.");
 
@@ -263,22 +221,20 @@ impl ThingSpeak {
                 return Err(ThingSpeakError::ResponseBuffer);
             }
 
-            response[response_len..response_len + n]
-                .copy_from_slice(&chunk[..n]);
+            response[response_len..response_len + n].copy_from_slice(&chunk[..n]);
 
             response_len += n;
 
-            let response_text = core::str::from_utf8(
-                &response[..response_len],
-            )
-            .map_err(|_| ThingSpeakError::InvalidResponse)?;
+            let response_text = core::str::from_utf8(&response[..response_len])
+                .map_err(|_| ThingSpeakError::InvalidResponse)?;
 
             if body_start.is_none() {
                 if let Some(position) = response_text.find("\r\n\r\n") {
                     body_start = Some(position + 4);
 
                     for line in response_text[..position].split("\r\n").skip(1) {
-                        if let Some(value) = line.strip_prefix("Content-Length: ")
+                        if let Some(value) = line
+                            .strip_prefix("Content-Length: ")
                             .or_else(|| line.strip_prefix("content-length: "))
                         {
                             content_length = value.parse::<usize>().ok();
@@ -294,10 +250,8 @@ impl ThingSpeak {
             }
         }
 
-        let response_text = core::str::from_utf8(
-            &response[..response_len],
-        )
-        .map_err(|_| ThingSpeakError::InvalidResponse)?;
+        let response_text = core::str::from_utf8(&response[..response_len])
+            .map_err(|_| ThingSpeakError::InvalidResponse)?;
 
         let status_line = response_text
             .split("\r\n")
@@ -330,7 +284,5 @@ impl ThingSpeak {
         println!("ThingSpeak update successful! Entry ID: {}", entry_id);
 
         Ok(entry_id)
-
     }
-    
 }
