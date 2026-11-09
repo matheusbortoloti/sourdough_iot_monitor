@@ -17,14 +17,33 @@ ens160-aq = "0.2.12"
 embedded-hal-bus = "0.3.0"
 embedded-hal = "1.0.0"
 aht30 = "1.0.1"
+libm = "0.2" # mathematical functions for no_std applications
+embassy-executor = "0.10.0"
+
+# Wi-Fi
+esp-radio = { version = "1.0.0-beta.1", features = ["esp32c3", "wifi", "esp-alloc"] }
+esp-rtos = {version = "0.4.0", features = ["esp32c3", "esp-radio", "esp-alloc", "embassy"]}
+esp-alloc = { version = "0.11.0", features = ["esp32c3"] }
+
+# Networking
+static_cell = "2.1.1"
+embassy-net = { version = "0.9.1", features = ["dhcpv4", "dns", "tcp"] }
+
+embassy-time = "0.5.1"
 
 
+mbedtls-rs-sys = { version = "=0.3.1", default-features = false, features = ["prebuilt"] }
+mbedtls-rs = { version = "0.3.0", default-features = false, features = ["esp32c3"] }
+rand_core = { version = "0.10.1", default-features = false }
 
 # For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
 [profile.dev]
 # The default debug profile is too slow and too big for resource-constrained devices.
 # Always build with some optimizations enabled.
 opt-level = "s"
+
+[profile.dev.package.esp-radio]
+opt-level = 3
 
 [profile.release]
 codegen-units = 1     # LLVM can perform better optimizations using a single thread

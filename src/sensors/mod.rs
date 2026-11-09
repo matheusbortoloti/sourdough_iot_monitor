@@ -10,7 +10,7 @@ pub mod aht21;
 pub mod vl6180x;
 pub mod ens160;
 
-type Vl6180xDriver<'a, I2C> = RefCellDevice<'a, I2C>;
+type Vl6180xDriver<'a, I2C> = vl6180x::Vl6180x<RefCellDevice<'a, I2C>>;
 type Ens160Driver<'a, I2C> = Ens160<RefCellDevice<'a, I2C>, Delay>;
 type Aht21Driver<'a, I2C> = Aht20<RefCellDevice<'a, I2C>, Delay>;
 
@@ -29,7 +29,7 @@ pub enum SensorMeasurementError<E> {
 }
 
 pub struct SensorReadings {
-    pub distance_mm: u8,
+    pub relative_height_mm: i16,
     pub ens160: ens160_aq::data::Measurements,
     pub aht21: aht21::Aht21Measurements,
 }
@@ -54,9 +54,11 @@ where
     I2C: I2c,
 {
     // 1. Initialize VL6180X
-    let mut vl6180x_i2c = RefCellDevice::new(i2c_bus);
+    let mut vl6180x_driver =
+    vl6180x::Vl6180x::new(RefCellDevice::new(i2c_bus));
 
-    vl6180x::initialize(&mut vl6180x_i2c)
+    vl6180x_driver
+        .initialize()
         .map_err(SensorInitError::Vl6180x)?;
 
     // 2. Initialize ENS160
@@ -79,7 +81,7 @@ where
 
     // 4. Return initialized drivers
     Ok(InitializedSensors {
-        vl6180x: vl6180x_i2c,
+        vl6180x: vl6180x_driver,
         ens160,
         aht21,
     })
@@ -96,20 +98,26 @@ pub fn get_measurements<I2C>(
 where
     I2C: I2c,
 {
-    let distance_mm =
-        vl6180x::get_distance_mm(&mut sensors.vl6180x, delay, 1000)
-            .map_err(SensorMeasurementError::Vl6180x)?;
-
-    let ens160 =
-        ens160::get_measurements(&mut sensors.ens160, 2000)
-            .map_err(SensorMeasurementError::Ens160)?;
-
     let aht21 =
         aht21::get_measurements(&mut sensors.aht21)
             .map_err(SensorMeasurementError::Aht21)?;
 
+    let ens160 =
+        ens160::get_measurements(
+            &mut sensors.ens160,
+            2000,
+            aht21.temperature,
+            aht21.humidity,
+        )
+        .map_err(SensorMeasurementError::Ens160)?;
+
+    let relative_height_mm = sensors
+        .vl6180x
+        .get_relative_height(delay, 1000)
+        .map_err(SensorMeasurementError::Vl6180x)?;
+
     Ok(SensorReadings {
-        distance_mm,
+        relative_height_mm,
         ens160,
         aht21,
     })

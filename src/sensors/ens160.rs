@@ -45,12 +45,21 @@ where
 }
 
 
-pub fn get_measurements<I2C, D>(sensor: &mut Ens160<I2C, D>, timeout_ms: u64) -> 
-  Result<ens160_aq::data::Measurements, Ens160MeasurementError<I2C::Error>>
+pub fn get_measurements<I2C, D>(
+    sensor: &mut Ens160<I2C, D>,
+    timeout_ms: u64,
+    temperature: f32,
+    humidity: f32,
+) -> Result<ens160_aq::data::Measurements, Ens160MeasurementError<I2C::Error>>
 where
     I2C: I2c,
     D: DelayNs,
 {
+    // Apply environmental compensation before reading measurements.
+    sensor
+        .set_temp_rh_comp(temperature, libm::roundf(humidity) as u16)
+        .map_err(Ens160MeasurementError::Driver)?;
+
     let start = Instant::now();
     let mut delay = Delay::new();
 
