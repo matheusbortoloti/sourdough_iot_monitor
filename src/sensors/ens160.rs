@@ -1,5 +1,4 @@
 use embedded_hal::{delay::DelayNs, i2c::I2c};
-
 use ens160_aq::Ens160;
 use esp_hal::{
     delay::Delay,

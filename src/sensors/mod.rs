@@ -1,6 +1,5 @@
-use core::cell::RefCell;
-
 use aht30::Aht20;
+use core::cell::RefCell;
 use embedded_hal::i2c::I2c;
 use embedded_hal_bus::i2c::RefCellDevice;
 use ens160_aq::Ens160;
@@ -29,7 +28,7 @@ pub enum SensorMeasurementError<E> {
 }
 
 pub struct SensorReadings {
-    pub relative_height_mm: i16,
+    pub relative_height_mm: f32,
     pub ens160: ens160_aq::data::Measurements,
     pub aht21: aht21::Aht21Measurements,
 }
