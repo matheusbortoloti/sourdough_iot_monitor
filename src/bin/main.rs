@@ -7,29 +7,25 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
+extern crate alloc;
+
+use core::cell::RefCell;
+use embassy_executor::Spawner;
+use embassy_time::{Duration, Instant, Timer};
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
-extern crate alloc;
-use core::cell::RefCell;
-
 use esp_println::println;
-
-use embassy_time::{Duration, Instant, Timer};
-
-use embassy_executor::Spawner;
-
 use mbedtls_rs::Tls;
 
+use sourdough_monitor::cloud::thingspeak::ThingSpeak;
 use sourdough_monitor::network::Network;
 use sourdough_monitor::sensors::{self};
 
-use sourdough_monitor::cloud::thingspeak::ThingSpeak;
-
-const SAMPLE_INTERVAL_MS: u64 = 10 * 1000; /* 10 seconds */
-const UPLOAD_INTERVAL_MS: u64 = 60 * 1000; /* 1 minutes */
+const SAMPLE_INTERVAL_MS: u64 = 30 * 1000; /* 30 seconds */
+const UPLOAD_INTERVAL_MS: u64 = 5 * 60 * 1000; /* 5 minutes */
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -41,8 +37,6 @@ fn halt() -> ! {
     loop {}
 }
 
-// This creates a default app-descriptor required by the esp-idf bootloader.
-// For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[allow(
@@ -56,14 +50,14 @@ async fn main(spawner: Spawner) {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    // Initialize heap memory for Wi-Fi.
+    // Initialize heap memory for Wi-Fi
     esp_alloc::heap_allocator!(#[ram(reclaimed)] size: 64 * 1024);
     esp_alloc::heap_allocator!(size: 56 * 1024);
 
-    // Initialize the timer group required by the RTOS.
+    // Initialize the timer group required by the RTOS
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
-    // Start the RTOS scheduler.
+    // Start the RTOS scheduler
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
     let network = match Network::initialize(peripherals.WIFI, &spawner).await {
@@ -127,18 +121,18 @@ async fn main(spawner: Spawner) {
     let mut next_sample = Instant::now();
     let mut next_upload = next_sample + Duration::from_millis(UPLOAD_INTERVAL_MS);
 
-    // Keep the latest successful sensor readings.
-    let mut latest_readings: Option<(i16, f32, f32, u16)> = None;
+    // Keep the latest successful sensor readings
+    let mut latest_readings: Option<(f32, f32, f32, u16)> = None;
 
     loop {
         let now = Instant::now();
 
-        // Sensor sampling schedule.
+        // Sensor sampling schedule
         if now >= next_sample {
             next_sample += Duration::from_millis(SAMPLE_INTERVAL_MS);
 
             // Skip missed sampling deadlines rather than taking
-            // several measurements back-to-back.
+            // several measurements back-to-back
             if next_sample <= now {
                 next_sample = now + Duration::from_millis(SAMPLE_INTERVAL_MS);
             }
@@ -151,7 +145,7 @@ async fn main(spawner: Spawner) {
 
                     latest_readings = Some((
                         readings.relative_height_mm,
-                        readings.aht21.temperature,
+                        readings.aht21.temperature_calibrated,
                         readings.aht21.humidity,
                         readings.ens160.tvoc_ppb,
                     ));
@@ -162,7 +156,7 @@ async fn main(spawner: Spawner) {
             }
         }
 
-        // ThingSpeak upload schedule.
+        // ThingSpeak upload schedule
         let now = Instant::now();
 
         if now >= next_upload {
@@ -197,7 +191,7 @@ async fn main(spawner: Spawner) {
             }
         }
 
-        // Sleep until whichever event is scheduled next.
+        // Sleep until whichever event is scheduled next
         let next_wakeup = core::cmp::min(next_sample, next_upload);
         Timer::at(next_wakeup).await;
     }

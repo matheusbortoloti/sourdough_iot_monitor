@@ -140,7 +140,7 @@ impl ThingSpeak {
     pub async fn upload_measurements(
         &self,
         tls: &Tls<'_>,
-        relative_height_mm: i16,
+        relative_height_mm: f32,
         temperature: f32,
         humidity: f32,
         tvoc_ppb: u16,

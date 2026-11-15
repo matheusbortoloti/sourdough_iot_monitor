@@ -1,5 +1,8 @@
+use crate::filters::kalman_filter::KalmanFilter1D;
 use embedded_hal::delay::DelayNs;
 use embedded_hal::i2c::I2c;
+use esp_println::print;
+use esp_println::println;
 
 const VL6180X_ADDRESS: u8 = 0x29;
 
@@ -12,6 +15,7 @@ const RANGE_STATUS_REGISTER: u16 = 0x004D;
 const INTERRUPT_STATUS_REGISTER: u16 = 0x004F;
 const RANGE_VALUE_REGISTER: u16 = 0x0062;
 const INTERRUPT_CLEAR_REGISTER: u16 = 0x0015;
+const READOUT_AVERAGING_SAMPLE_PERIOD: u16 = 0x010A; // 48 corresponds to 4.8 ms
 
 const RANGE_READY_MASK: u8 = 0x07;
 const RANGE_READY_VALUE: u8 = 0x04;
@@ -19,7 +23,10 @@ const RANGE_READY_VALUE: u8 = 0x04;
 const SYSTEM_INTERRUPT_CONFIG_GPIO: u16 = 0x0014;
 const SYSRANGE_MAX_CONVERGENCE_TIME: u16 = 0x001C;
 
-const MOVING_AVERAGE_WINDOW: usize = 10;
+const KALMAN_FILTER_PROCESS_NOISE: f32 = 0.01;
+const KALMAN_FILTER_MEASUREMENT_NOISE: f32 = 1.2;
+
+const INTERNAL_AVERAGING_SAMPLE_PERIOD: u8 = 0xFF;
 
 #[derive(Debug)]
 pub enum Vl6180xInitError<E> {
@@ -38,7 +45,7 @@ pub enum Vl6180xMeasurementError<E> {
 pub struct Vl6180x<I2C> {
     i2c: I2C,
     reference_distance_mm: Option<u8>,
-    moving_average: MovingAverage,
+    kalman_filter: KalmanFilter1D,
 }
 
 impl<I2C> Vl6180x<I2C> {
@@ -46,52 +53,11 @@ impl<I2C> Vl6180x<I2C> {
         Self {
             i2c,
             reference_distance_mm: None,
-            moving_average: MovingAverage::new(),
+            kalman_filter: KalmanFilter1D::new(
+                KALMAN_FILTER_MEASUREMENT_NOISE,
+                KALMAN_FILTER_PROCESS_NOISE,
+            ),
         }
-    }
-}
-
-struct MovingAverage {
-    samples: [i16; MOVING_AVERAGE_WINDOW],
-    count: usize,
-    next_index: usize,
-    sum: i32,
-}
-
-impl MovingAverage {
-    fn new() -> Self {
-        Self {
-            samples: [0; MOVING_AVERAGE_WINDOW],
-            count: 0,
-            next_index: 0,
-            sum: 0,
-        }
-    }
-
-    fn update(&mut self, new_sample: i16) -> i16 {
-        // Remove the oldest sample when the window is full.
-        if self.count == MOVING_AVERAGE_WINDOW {
-            self.sum -= self.samples[self.next_index] as i32;
-        } else {
-            self.count += 1;
-        }
-
-        // Store the new sample.
-        self.samples[self.next_index] = new_sample;
-        self.sum += new_sample as i32;
-
-        // Advance the circular buffer index.
-        self.next_index = (self.next_index + 1) % MOVING_AVERAGE_WINDOW;
-
-        // Calculate the average.
-        (self.sum / self.count as i32) as i16
-    }
-
-    fn reset(&mut self) {
-        self.samples = [0; MOVING_AVERAGE_WINDOW];
-        self.count = 0;
-        self.next_index = 0;
-        self.sum = 0;
     }
 }
 
@@ -175,13 +141,21 @@ where
             .map_err(Vl6180xInitError::Communication)?;
     }
 
-    // Configure range-ready interrupt.
+    // Configure range-ready interrupt
     write_register(i2c, SYSTEM_INTERRUPT_CONFIG_GPIO, 0x24)
         .map_err(Vl6180xInitError::Communication)?;
 
-    // Set maximum range convergence time to 49 ms.
+    // Set maximum range convergence time to 49 ms
     write_register(i2c, SYSRANGE_MAX_CONVERGENCE_TIME, 0x31)
         .map_err(Vl6180xInitError::Communication)?;
+
+    // Increase averaging time to the maximum: more energy consumption, but lower noise
+    write_register(
+        i2c,
+        READOUT_AVERAGING_SAMPLE_PERIOD,
+        INTERNAL_AVERAGING_SAMPLE_PERIOD,
+    )
+    .map_err(Vl6180xInitError::Communication)?;
 
     Ok(())
 }
@@ -195,7 +169,7 @@ where
     I2C: I2c,
     D: DelayNs,
 {
-    // Wait until the sensor is ready for a new measurement.
+    // Wait until the sensor is ready for a new measurement
     let mut elapsed_ms = 0;
 
     loop {
@@ -214,15 +188,15 @@ where
         elapsed_ms += 1;
     }
 
-    // Clear any previous interrupt conditions.
+    // Clear any previous interrupt conditions
     write_register(i2c, INTERRUPT_CLEAR_REGISTER, 0x07)
         .map_err(Vl6180xMeasurementError::Communication)?;
 
-    // Start a single-shot measurement.
+    // Start a single-shot measurement
     write_register(i2c, RANGE_START_REGISTER, 0x01)
         .map_err(Vl6180xMeasurementError::Communication)?;
 
-    // Wait for measurement completion.
+    // Wait for measurement completion
     elapsed_ms = 0;
 
     loop {
@@ -247,7 +221,7 @@ where
         elapsed_ms += 1;
     }
 
-    // Read the range status.
+    // Read the range status
     let range_status = match read_register(i2c, RANGE_STATUS_REGISTER) {
         Ok(status) => status,
         Err(error) => {
@@ -256,7 +230,7 @@ where
         }
     };
 
-    // Read the distance.
+    // Read the distance
     let distance = match read_register(i2c, RANGE_VALUE_REGISTER) {
         Ok(distance) => distance,
         Err(error) => {
@@ -265,11 +239,11 @@ where
         }
     };
 
-    // Always clear the interrupt after a completed measurement.
+    // Always clear the interrupt after a completed measurement
     write_register(i2c, INTERRUPT_CLEAR_REGISTER, 0x07)
         .map_err(Vl6180xMeasurementError::Communication)?;
 
-    // Check the measurement result.
+    // Check the measurement result
     let range_error = range_status >> 4;
 
     if range_error != 0 {
@@ -295,10 +269,23 @@ where
     where
         D: DelayNs,
     {
-        let distance = read_distance_mm(&mut self.i2c, delay, timeout_ms)?;
+        const DELAY_BETWEEN_SAMPLES_MS: u32 = 1_000;
+        const NUMBER_OF_SAMPLES_FOR_REFERENCE: u8 = 60;
+        self.kalman_filter.reset();
 
-        self.moving_average.reset();
-        self.reference_distance_mm = Some(distance);
+        println!("Starting to collecting distance...");
+        for _ in 1..NUMBER_OF_SAMPLES_FOR_REFERENCE {
+            let distance = read_distance_mm(&mut self.i2c, delay, timeout_ms)?;
+            print!("{distance};");
+
+            self.kalman_filter.update(distance as i16);
+            delay.delay_ms(DELAY_BETWEEN_SAMPLES_MS);
+        }
+
+        let distance = read_distance_mm(&mut self.i2c, delay, timeout_ms)?;
+        self.reference_distance_mm = Some(self.kalman_filter.update(distance as i16) as u8);
+
+        self.kalman_filter.reset();
 
         Ok(distance)
     }
@@ -307,7 +294,7 @@ where
         &mut self,
         delay: &mut D,
         timeout_ms: u32,
-    ) -> Result<i16, Vl6180xMeasurementError<I2C::Error>>
+    ) -> Result<f32, Vl6180xMeasurementError<I2C::Error>>
     where
         D: DelayNs,
     {
@@ -322,7 +309,7 @@ where
 
         let relative_height = reference as i16 - current_distance as i16;
 
-        let filtered_height = self.moving_average.update(relative_height);
+        let filtered_height = self.kalman_filter.update(relative_height);
 
         Ok(filtered_height)
     }
