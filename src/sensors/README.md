@@ -36,10 +36,7 @@ The AHT21 provides temperature and relative humidity measurements.
 
 The current implementation applies an empirical temperature offset correction:
 
-\[
-T_{\mathrm{corrected}} =
-T_{\mathrm{raw}} - 15\,^\circ\mathrm{C}
-\]
+$$T_{corrected} =T_{raw} - 15^\circ\mathrm{C}$$
 
 This correction was determined experimentally for the current hardware setup.
 

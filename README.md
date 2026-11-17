@@ -28,6 +28,7 @@ The long-term goal is to combine changes in sourdough height with environmental 
   - [Data Collection](#data-collection)
     - [ThingSpeak channel fields](#thingspeak-channel-fields)
   - [Data Analysis](#data-analysis)
+  - [Mechanical Design](#mechanical-design)
   - [Getting Started](#getting-started)
     - [Requirements](#requirements)
     - [Clone the repository](#clone-the-repository)
@@ -165,7 +166,15 @@ The datasets are experimental observations from a specific setup. Results may va
 
 The Python environment is managed by the `uv` tool. To activate the python environment use `$ source .venv/bin/activate`.
 
+An interesting research direction that is currently being pursued consists of fitting a Gompertz curve to different growth profiles and understanding how environmental factors correlate with the parameters of the fitted curve. Another idea is to relate the measured TVOC to height to detect the peak without relying on height measurements.
+
+![Gompertz curve](doc/pictures/fit_gompertz.png)
 **This is a working in progress.**
+
+## Mechanical Design 
+To ensure a proper mechanical assembly**,** a housing was designed and 3D printed. It encloses the PCB and provides stable support above the sourdough**,** minimizing environmental interference. However, it is recommended to place the system inside a closed**,** thermally insulated space to obtain more accurate measurements.
+
+![3D Printed Housing](doc/pictures/3d_housing.png)
 
 ## Getting Started
 
