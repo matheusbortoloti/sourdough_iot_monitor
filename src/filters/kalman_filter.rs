@@ -30,7 +30,7 @@ impl KalmanFilter1D {
     }
 
     /// Feeds a new raw measurement reading and returns the smoothed estimate
-    pub fn update(&mut self, measurement_mm: i16) -> f32 {
+    pub fn update(&mut self, measurement_mm: f32) -> f32 {
         let meas = measurement_mm as f32;
 
         if !self.initialized {

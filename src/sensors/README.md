@@ -23,3 +23,43 @@ The table bellow shows quantitatively the improvements obtained with the actions
 The picture bellows shows graphically the improvement obtained between the raw data and the data with increased averaging plus the Kalman filter.
 
 ![VL6180X Raw Measurements](../../doc/pictures/vl6180x_measurements.png)
+
+#### Reference establishment
+
+At startup, the firmware collects 60 distance measurements, approximately one second apart.
+
+These measurements are processed by a 1D Kalman filter to establish the reference distance. The filter is then reset before normal measurement acquisition begins.
+
+### AHT21: temperature and humidity
+
+The AHT21 provides temperature and relative humidity measurements.
+
+The current implementation applies an empirical temperature offset correction:
+
+\[
+T_{\mathrm{corrected}} =
+T_{\mathrm{raw}} - 15\,^\circ\mathrm{C}
+\]
+
+This correction was determined experimentally for the current hardware setup.
+
+Two temperature values are retained:
+
+- Raw temperature, used for ENS160 environmental compensation.
+- Offset-corrected temperature, uploaded to ThingSpeak.
+
+The distinction is intentional: the temperature near the sensor and the ESP32-C3 board can differ from the ambient environment surrounding the sourdough.
+
+The correction is experimental and has not yet been established as a generally valid calibration.
+
+### ENS160: TVOC measurements
+
+The ENS160 provides air-quality measurements, including total volatile organic compounds (TVOC).
+
+Before reading the measurements, the firmware supplies temperature and humidity compensation values obtained from the AHT21.
+
+The raw AHT21 temperature is used for this compensation because the ENS160 requires information about the local sensor environment.
+
+TVOC measurements are collected as a possible indicator of changes in the sourdough's surrounding environment.
+
+Their relationship with fermentation activity is still being investigated. TVOC should not be interpreted as a direct or validated measurement of microbial activity.

@@ -24,7 +24,7 @@ use sourdough_monitor::cloud::thingspeak::ThingSpeak;
 use sourdough_monitor::network::Network;
 use sourdough_monitor::sensors::{self};
 
-const SAMPLE_INTERVAL_MS: u64 = 30 * 1000; /* 30 seconds */
+const SAMPLE_INTERVAL_MS: u64 = 20 * 1000; /* 20 seconds */
 const UPLOAD_INTERVAL_MS: u64 = 5 * 60 * 1000; /* 5 minutes */
 
 #[panic_handler]

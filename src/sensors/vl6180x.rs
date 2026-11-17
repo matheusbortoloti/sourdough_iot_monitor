@@ -1,7 +1,6 @@
 use crate::filters::kalman_filter::KalmanFilter1D;
 use embedded_hal::delay::DelayNs;
 use embedded_hal::i2c::I2c;
-use esp_println::print;
 use esp_println::println;
 
 const VL6180X_ADDRESS: u8 = 0x29;
@@ -44,7 +43,7 @@ pub enum Vl6180xMeasurementError<E> {
 
 pub struct Vl6180x<I2C> {
     i2c: I2C,
-    reference_distance_mm: Option<u8>,
+    reference_distance_mm: Option<f32>,
     kalman_filter: KalmanFilter1D,
 }
 
@@ -265,7 +264,7 @@ where
         &mut self,
         delay: &mut D,
         timeout_ms: u32,
-    ) -> Result<u8, Vl6180xMeasurementError<I2C::Error>>
+    ) -> Result<f32, Vl6180xMeasurementError<I2C::Error>>
     where
         D: DelayNs,
     {
@@ -273,21 +272,22 @@ where
         const NUMBER_OF_SAMPLES_FOR_REFERENCE: u8 = 60;
         self.kalman_filter.reset();
 
-        println!("Starting to collecting distance...");
+        println!("Starting to collecting distance for reference...");
         for _ in 1..NUMBER_OF_SAMPLES_FOR_REFERENCE {
             let distance = read_distance_mm(&mut self.i2c, delay, timeout_ms)?;
-            print!("{distance};");
 
-            self.kalman_filter.update(distance as i16);
+            self.kalman_filter.update(distance as f32);
             delay.delay_ms(DELAY_BETWEEN_SAMPLES_MS);
         }
 
         let distance = read_distance_mm(&mut self.i2c, delay, timeout_ms)?;
-        self.reference_distance_mm = Some(self.kalman_filter.update(distance as i16) as u8);
+        self.reference_distance_mm = Some(self.kalman_filter.update(distance as f32));
 
         self.kalman_filter.reset();
 
-        Ok(distance)
+        Ok(self
+            .reference_distance_mm
+            .expect("Error when establishing reference distance!"))
     }
 
     pub fn get_relative_height<D>(
@@ -307,7 +307,7 @@ where
 
         let current_distance = read_distance_mm(&mut self.i2c, delay, timeout_ms)?;
 
-        let relative_height = reference as i16 - current_distance as i16;
+        let relative_height = reference - current_distance as f32;
 
         let filtered_height = self.kalman_filter.update(relative_height);
 

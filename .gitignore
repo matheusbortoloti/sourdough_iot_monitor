@@ -27,3 +27,16 @@ target/
 
 # Local configuration and secrets
 esp-config.toml
+
+# Python (uv) ignores
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+sourdough_monitor/

@@ -125,13 +125,6 @@ pub async fn connect(
     match controller.scan_async(&scan_config).await {
         Ok(access_points) => {
             println!("Found {} access points:", access_points.len());
-
-            for access_point in access_points {
-                println!(
-                    "SSID: {:?}, Signal: {} dBm",
-                    access_point.ssid, access_point.signal_strength
-                );
-            }
         }
         Err(error) => {
             println!("Wi-Fi scan failed: {:?}", error);
@@ -166,9 +159,8 @@ pub async fn connect(
     println!("Connecting to Wi-Fi...");
 
     match controller.connect_async().await {
-        Ok(connection_info) => {
+        Ok(_connection_info) => {
             println!("Wi-Fi connection established!");
-            println!("Connection info: {:?}", connection_info);
         }
         Err(error) => {
             return Err(NetworkError::WifiConnection(error));
