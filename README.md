@@ -172,7 +172,7 @@ An interesting research direction that is currently being pursued consists of fi
 **This is a working in progress.**
 
 ## Mechanical Design 
-To ensure a proper mechanical assembly**,** a housing was designed and 3D printed. It encloses the PCB and provides stable support above the sourdough**,** minimizing environmental interference. However, it is recommended to place the system inside a closed**,** thermally insulated space to obtain more accurate measurements.
+To ensure a proper mechanical assembly, a housing was designed and 3D printed. It encloses the PCB and provides stable support above the sourdough, minimizing environmental interference. However, it is recommended to place the system inside a closed, thermally insulated space to obtain more accurate measurements.
 
 ![3D Printed Housing](doc/pictures/3d_housing.png)
 
