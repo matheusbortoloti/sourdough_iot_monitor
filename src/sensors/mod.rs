@@ -7,17 +7,20 @@ use esp_hal::delay::Delay;
 
 pub mod aht21;
 pub mod ens160;
+pub mod scd41;
 pub mod vl6180x;
 
 type Vl6180xDriver<'a, I2C> = vl6180x::Vl6180x<RefCellDevice<'a, I2C>>;
 type Ens160Driver<'a, I2C> = Ens160<RefCellDevice<'a, I2C>, Delay>;
 type Aht21Driver<'a, I2C> = Aht20<RefCellDevice<'a, I2C>, Delay>;
+type Scd41Driver<'a, I2C> = scd41::Scd41Driver<RefCellDevice<'a, I2C>>;
 
 #[derive(Debug)]
 pub enum SensorInitError<E> {
     Vl6180x(vl6180x::Vl6180xInitError<E>),
     Ens160(ens160::Ens160InitError<E>),
     Aht21(aht21::Aht21InitError),
+    Scd41(scd4x::Error<E>),
 }
 
 #[derive(Debug)]
@@ -25,24 +28,32 @@ pub enum SensorMeasurementError<E> {
     Vl6180x(vl6180x::Vl6180xMeasurementError<E>),
     Ens160(ens160::Ens160MeasurementError<E>),
     Aht21(aht21::Aht21MeasurementError),
+    Scd41(scd4x::Error<E>),
 }
 
 pub struct SensorReadings {
     pub relative_height_mm: f32,
     pub ens160: ens160_aq::data::Measurements,
     pub aht21: aht21::Aht21Measurements,
+    pub scd41: Option<scd41::Scd41Measurements>,
 }
 
-pub struct InitializedSensors<Vl6180xDriver, Ens160Driver, Aht21Driver> {
+pub struct InitializedSensors<Vl6180xDriver, Ens160Driver, Aht21Driver, Scd41Driver> {
     pub vl6180x: Vl6180xDriver,
     pub ens160: Ens160Driver,
     pub aht21: Aht21Driver,
+    pub scd41: Scd41Driver,
 }
 
 pub fn initialize<'a, I2C>(
     i2c_bus: &'a RefCell<I2C>,
 ) -> Result<
-    InitializedSensors<Vl6180xDriver<'a, I2C>, Ens160Driver<'a, I2C>, Aht21Driver<'a, I2C>>,
+    InitializedSensors<
+        Vl6180xDriver<'a, I2C>,
+        Ens160Driver<'a, I2C>,
+        Aht21Driver<'a, I2C>,
+        Scd41Driver<'a, I2C>,
+    >,
     SensorInitError<I2C::Error>,
 >
 where
@@ -65,11 +76,15 @@ where
 
     aht21::initialize(&mut aht21).map_err(SensorInitError::Aht21)?;
 
-    // 4. Return initialized drivers
+    // 4. Initialize SCD41
+    let scd41 = scd41::initialize(RefCellDevice::new(i2c_bus)).map_err(SensorInitError::Scd41)?;
+
+    // 5. Return initialized drivers
     Ok(InitializedSensors {
         vl6180x: vl6180x_driver,
         ens160,
         aht21,
+        scd41,
     })
 }
 
@@ -78,6 +93,7 @@ pub fn get_measurements<I2C>(
         Vl6180xDriver<'_, I2C>,
         Ens160Driver<'_, I2C>,
         Aht21Driver<'_, I2C>,
+        Scd41Driver<'_, I2C>,
     >,
     delay: &mut Delay,
 ) -> Result<SensorReadings, SensorMeasurementError<I2C::Error>>
@@ -96,9 +112,13 @@ where
         .get_relative_height(delay, 1000)
         .map_err(SensorMeasurementError::Vl6180x)?;
 
+    let scd41 =
+        scd41::get_measurements(&mut sensors.scd41).map_err(SensorMeasurementError::Scd41)?;
+
     Ok(SensorReadings {
         relative_height_mm,
         ens160,
         aht21,
+        scd41,
     })
 }

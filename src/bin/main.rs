@@ -149,6 +149,20 @@ async fn main(spawner: Spawner) {
                         readings.aht21.humidity,
                         readings.ens160.tvoc_ppb,
                     ));
+
+                    match readings.scd41 {
+                        Some(measurement) => {
+                            println!("SCD41 CO2: {} ppm", measurement.co2_ppm);
+                            println!(
+                                "SCD41 Temperature: {:.2} °C",
+                                measurement.temperature_celsius
+                            );
+                            println!("SCD41 Humidity: {:.2} %", measurement.humidity_percent);
+                        }
+                        None => {
+                            println!("SCD41: No new measurement available");
+                        }
+                    }
                 }
                 Err(error) => {
                     println!("Measurement error: {:?}", error);

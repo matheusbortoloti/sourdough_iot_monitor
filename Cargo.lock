@@ -2448,6 +2448,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "scd4x"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58bba96074083e0e8e04dd0139a3d64341f3b8e10ce0f2e2e4293c3cd7b7f701"
+dependencies = [
+ "embedded-hal 1.0.0",
+ "sensirion-i2c",
+]
+
+[[package]]
 name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2461,6 +2471,15 @@ checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 dependencies = [
  "serde",
  "serde_core",
+]
+
+[[package]]
+name = "sensirion-i2c"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "640a03c95c176226cf159ae2727f7fe3245546022639d61459af46d2878aec06"
+dependencies = [
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -2633,6 +2652,7 @@ dependencies = [
  "mbedtls-rs",
  "mbedtls-rs-sys",
  "rand_core 0.10.1",
+ "scd4x",
  "static_cell",
 ]
 
