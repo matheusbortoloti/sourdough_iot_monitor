@@ -5,7 +5,7 @@ use embassy_net::IpEndpoint;
 use embassy_net::Stack;
 use embassy_net::tcp::TcpSocket;
 use esp_println::println;
-use mbedtls_rs::io::Write;
+use mbedtls_rs::io::{Read, Write};
 use mbedtls_rs::{Session, SessionConfig, Tls};
 use static_cell::StaticCell;
 
@@ -48,23 +48,23 @@ impl<const N: usize> FixedBuffer<N> {
         &self.bytes[..self.len]
     }
 
-    fn as_str(&self) -> Result<&str, ThingSpeakError> {
-        core::str::from_utf8(self.as_bytes()).map_err(|_| ThingSpeakError::InvalidResponse)
-    }
-}
-
-impl<const N: usize> fmt::Write for FixedBuffer<N> {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        let end = self.len + s.len();
+    fn extend_from_slice(&mut self, bytes: &[u8]) -> fmt::Result {
+        let end = self.len.checked_add(bytes.len()).ok_or(fmt::Error)?;
 
         if end > N {
             return Err(fmt::Error);
         }
 
-        self.bytes[self.len..end].copy_from_slice(s.as_bytes());
+        self.bytes[self.len..end].copy_from_slice(bytes);
         self.len = end;
 
         Ok(())
+    }
+}
+
+impl<const N: usize> fmt::Write for FixedBuffer<N> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.extend_from_slice(s.as_bytes())
     }
 }
 
@@ -137,59 +137,54 @@ impl ThingSpeak {
         Ok(())
     }
 
-    pub async fn upload_measurements(
-        &self,
-        tls: &Tls<'_>,
+    fn build_request_body(
         relative_height_mm: f32,
         temperature: f32,
         humidity: f32,
         tvoc_ppb: u16,
-        rx_buffer: &mut [u8],
-        tx_buffer: &mut [u8],
-    ) -> Result<u32, ThingSpeakError> {
-        let socket = self.connect(rx_buffer, tx_buffer).await?;
-
-        let client_config = crate::cloud::tls::client_config().ok_or(ThingSpeakError::TlsConfig)?;
-
-        let config = SessionConfig::Client(client_config);
-
-        let mut session =
-            Session::new(tls.reference(), socket, &config).map_err(ThingSpeakError::Tls)?;
-
-        session.connect().await.map_err(ThingSpeakError::Tls)?;
-
-        println!("ThingSpeak TLS handshake successful!");
-
-        // Build the form-encoded POST body.
+        co2_ppm: u16,
+    ) -> Result<FixedBuffer<128>, ThingSpeakError> {
         let mut body = FixedBuffer::<128>::new();
 
         write!(
             &mut body,
-            "api_key={}&field1={}&field2={:.2}&field3={:.2}&field4={}",
-            THINGSPEAK_WRITE_API_KEY, relative_height_mm, temperature, humidity, tvoc_ppb,
+            "api_key={}&field1={}&field2={:.2}&field3={:.2}&field4={}&field5={}",
+            THINGSPEAK_WRITE_API_KEY, relative_height_mm, temperature, humidity, tvoc_ppb, co2_ppm
         )
         .map_err(|_| ThingSpeakError::RequestBuffer)?;
 
-        // Build the HTTP request.
+        Ok(body)
+    }
+
+    fn build_http_request(body: &FixedBuffer<128>) -> Result<FixedBuffer<384>, ThingSpeakError> {
         let mut request = FixedBuffer::<384>::new();
 
         write!(
             &mut request,
             "POST /update HTTP/1.1\r\n\
-            Host: api.thingspeak.com\r\n\
-            Content-Type: application/x-www-form-urlencoded\r\n\
-            Content-Length: {}\r\n\
-            Connection: close\r\n\
-            \r\n",
+         Host: api.thingspeak.com\r\n\
+         Content-Type: application/x-www-form-urlencoded\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n",
             body.len,
         )
         .map_err(|_| ThingSpeakError::RequestBuffer)?;
 
         request
-            .write_str(body.as_str()?)
+            .extend_from_slice(body.as_bytes())
             .map_err(|_| ThingSpeakError::RequestBuffer)?;
 
-        // Send the request.
+        Ok(request)
+    }
+
+    async fn send_http_request<W>(
+        session: &mut W,
+        request: &FixedBuffer<384>,
+    ) -> Result<(), ThingSpeakError>
+    where
+        W: Write<Error = mbedtls_rs::SessionError>,
+    {
         session
             .write_all(request.as_bytes())
             .await
@@ -199,11 +194,18 @@ impl ThingSpeak {
 
         println!("ThingSpeak POST request sent.");
 
-        // Receive the HTTP response.
-        let mut response = [0u8; 2048];
-        let mut response_len = 0;
+        Ok(())
+    }
 
+    async fn receive_http_response<R>(
+        session: &mut R,
+        response: &mut FixedBuffer<2048>,
+    ) -> Result<(), ThingSpeakError>
+    where
+        R: Read<Error = mbedtls_rs::SessionError>,
+    {
         let mut chunk = [0u8; 128];
+
         let mut body_start = None;
         let mut content_length = None;
 
@@ -217,15 +219,11 @@ impl ThingSpeak {
                 break;
             }
 
-            if response_len + n > response.len() {
-                return Err(ThingSpeakError::ResponseBuffer);
-            }
+            response
+                .extend_from_slice(&chunk[..n])
+                .map_err(|_| ThingSpeakError::ResponseBuffer)?;
 
-            response[response_len..response_len + n].copy_from_slice(&chunk[..n]);
-
-            response_len += n;
-
-            let response_text = core::str::from_utf8(&response[..response_len])
+            let response_text = core::str::from_utf8(response.as_bytes())
                 .map_err(|_| ThingSpeakError::InvalidResponse)?;
 
             if body_start.is_none() {
@@ -233,56 +231,108 @@ impl ThingSpeak {
                     body_start = Some(position + 4);
 
                     for line in response_text[..position].split("\r\n").skip(1) {
-                        if let Some(value) = line
-                            .strip_prefix("Content-Length: ")
-                            .or_else(|| line.strip_prefix("content-length: "))
-                        {
-                            content_length = value.parse::<usize>().ok();
+                        if let Some((name, value)) = line.split_once(':') {
+                            if name.trim().eq_ignore_ascii_case("content-length") {
+                                content_length = value.trim().parse::<usize>().ok();
+                            }
                         }
                     }
                 }
             }
 
             if let (Some(start), Some(length)) = (body_start, content_length) {
-                if response_len >= start + length {
+                let expected_length = start
+                    .checked_add(length)
+                    .ok_or(ThingSpeakError::InvalidResponse)?;
+
+                if response.len >= expected_length {
                     break;
                 }
             }
         }
 
-        let response_text = core::str::from_utf8(&response[..response_len])
-            .map_err(|_| ThingSpeakError::InvalidResponse)?;
+        Ok(())
+    }
 
-        let status_line = response_text
-            .split("\r\n")
-            .next()
-            .ok_or(ThingSpeakError::InvalidResponse)?;
+    pub async fn upload_measurements(
+        &self,
+        tls: &Tls<'_>,
+        relative_height_mm: f32,
+        temperature: f32,
+        humidity: f32,
+        tvoc_ppb: u16,
+        co2_ppm: u16,
+        rx_buffer: &mut [u8],
+        tx_buffer: &mut [u8],
+    ) -> Result<u32, ThingSpeakError> {
+        // Establish TLS connection
+        let socket = self.connect(rx_buffer, tx_buffer).await?;
 
-        let status_code: u16 = status_line
-            .split_ascii_whitespace()
-            .nth(1)
-            .and_then(|s| s.parse().ok())
-            .ok_or(ThingSpeakError::InvalidResponse)?;
+        let client_config = crate::cloud::tls::client_config().ok_or(ThingSpeakError::TlsConfig)?;
 
-        if status_code != 200 {
-            return Err(ThingSpeakError::HttpStatus(status_code));
-        }
+        let config = SessionConfig::Client(client_config);
 
-        let body_start = response_text
-            .find("\r\n\r\n")
-            .ok_or(ThingSpeakError::InvalidResponse)?;
+        let mut session =
+            Session::new(tls.reference(), socket, &config).map_err(ThingSpeakError::Tls)?;
 
-        let entry_id: u32 = response_text[body_start + 4..]
-            .trim()
-            .parse()
-            .map_err(|_| ThingSpeakError::InvalidResponse)?;
+        session.connect().await.map_err(ThingSpeakError::Tls)?;
 
-        if entry_id == 0 {
-            return Err(ThingSpeakError::UpdateRejected);
-        }
+        println!("ThingSpeak TLS handshake successful!");
+
+        // Build HTTP request
+        let body =
+            Self::build_request_body(relative_height_mm, temperature, humidity, tvoc_ppb, co2_ppm)?;
+
+        let request = Self::build_http_request(&body)?;
+
+        // Send HTTP request
+        Self::send_http_request(&mut session, &request).await?;
+
+        // Receive HTTP response
+        let mut response = FixedBuffer::<2048>::new();
+
+        Self::receive_http_response(&mut session, &mut response).await?;
+
+        // Parse response
+        let entry_id = parse_http_response(response.as_bytes())?;
 
         println!("ThingSpeak update successful! Entry ID: {}", entry_id);
 
         Ok(entry_id)
     }
+}
+
+fn parse_http_response(response: &[u8]) -> Result<u32, ThingSpeakError> {
+    let response_text =
+        core::str::from_utf8(response).map_err(|_| ThingSpeakError::InvalidResponse)?;
+
+    let status_line = response_text
+        .split("\r\n")
+        .next()
+        .ok_or(ThingSpeakError::InvalidResponse)?;
+
+    let status_code: u16 = status_line
+        .split_ascii_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .ok_or(ThingSpeakError::InvalidResponse)?;
+
+    if status_code != 200 {
+        return Err(ThingSpeakError::HttpStatus(status_code));
+    }
+
+    let body_start = response_text
+        .find("\r\n\r\n")
+        .ok_or(ThingSpeakError::InvalidResponse)?;
+
+    let entry_id: u32 = response_text[body_start + 4..]
+        .trim()
+        .parse()
+        .map_err(|_| ThingSpeakError::InvalidResponse)?;
+
+    if entry_id == 0 {
+        return Err(ThingSpeakError::UpdateRejected);
+    }
+
+    Ok(entry_id)
 }

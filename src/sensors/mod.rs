@@ -28,14 +28,14 @@ pub enum SensorMeasurementError<E> {
     Vl6180x(vl6180x::Vl6180xMeasurementError<E>),
     Ens160(ens160::Ens160MeasurementError<E>),
     Aht21(aht21::Aht21MeasurementError),
-    Scd41(scd4x::Error<E>),
+    Scd41(scd41::Scd41MeasurementError<E>),
 }
 
 pub struct SensorReadings {
     pub relative_height_mm: f32,
     pub ens160: ens160_aq::data::Measurements,
     pub aht21: aht21::Aht21Measurements,
-    pub scd41: Option<scd41::Scd41Measurements>,
+    pub scd41: scd41::Scd41Measurements,
 }
 
 pub struct InitializedSensors<Vl6180xDriver, Ens160Driver, Aht21Driver, Scd41Driver> {

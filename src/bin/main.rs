@@ -122,7 +122,7 @@ async fn main(spawner: Spawner) {
     let mut next_upload = next_sample + Duration::from_millis(UPLOAD_INTERVAL_MS);
 
     // Keep the latest successful sensor readings
-    let mut latest_readings: Option<(f32, f32, f32, u16)> = None;
+    let mut latest_readings: Option<(f32, f32, f32, u16, u16)> = None;
 
     loop {
         let now = Instant::now();
@@ -142,27 +142,15 @@ async fn main(spawner: Spawner) {
                     println!("Distance: {} mm", readings.relative_height_mm);
                     println!("ENS160 TVOC: {} ppb", readings.ens160.tvoc_ppb);
                     println!("AHT21: {:?}", readings.aht21);
+                    println!("SCD41 CO2: {} ppm", readings.scd41.co2_ppm);
 
                     latest_readings = Some((
                         readings.relative_height_mm,
                         readings.aht21.temperature_calibrated,
                         readings.aht21.humidity,
                         readings.ens160.tvoc_ppb,
+                        readings.scd41.co2_ppm,
                     ));
-
-                    match readings.scd41 {
-                        Some(measurement) => {
-                            println!("SCD41 CO2: {} ppm", measurement.co2_ppm);
-                            println!(
-                                "SCD41 Temperature: {:.2} °C",
-                                measurement.temperature_celsius
-                            );
-                            println!("SCD41 Humidity: {:.2} %", measurement.humidity_percent);
-                        }
-                        None => {
-                            println!("SCD41: No new measurement available");
-                        }
-                    }
                 }
                 Err(error) => {
                     println!("Measurement error: {:?}", error);
@@ -180,7 +168,7 @@ async fn main(spawner: Spawner) {
                 next_upload = now + Duration::from_millis(UPLOAD_INTERVAL_MS);
             }
 
-            if let Some((distance, temperature, humidity, tvoc)) = latest_readings {
+            if let Some((distance, temperature, humidity, tvoc, scd41)) = latest_readings {
                 match thingspeak
                     .upload_measurements(
                         &tls,
@@ -188,6 +176,7 @@ async fn main(spawner: Spawner) {
                         temperature,
                         humidity,
                         tvoc,
+                        scd41,
                         &mut rx_buffer[..],
                         &mut tx_buffer[..],
                     )
