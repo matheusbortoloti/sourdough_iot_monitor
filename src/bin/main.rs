@@ -27,6 +27,39 @@ use sourdough_monitor::sensors::{self};
 const SAMPLE_INTERVAL_MS: u64 = 20 * 1000; /* 20 seconds */
 const UPLOAD_INTERVAL_MS: u64 = 5 * 60 * 1000; /* 5 minutes */
 
+#[derive(Clone, Copy, Debug)]
+struct LatestReadings {
+    relative_height_mm: f32,
+    temperature_celsius: f32,
+    humidity_percent: f32,
+    tvoc_ppb: u16,
+    co2_ppm: u16,
+}
+
+struct SharedState {
+    latest_readings: critical_section::Mutex<RefCell<Option<LatestReadings>>>,
+}
+
+impl SharedState {
+    const fn new() -> Self {
+        Self {
+            latest_readings: critical_section::Mutex::new(RefCell::new(None)),
+        }
+    }
+
+    fn update(&self, readings: LatestReadings) {
+        critical_section::with(|cs| {
+            *self.latest_readings.borrow(cs).borrow_mut() = Some(readings);
+        });
+    }
+
+    fn latest_readings(&self) -> Option<LatestReadings> {
+        critical_section::with(|cs| *self.latest_readings.borrow(cs).borrow())
+    }
+}
+
+static SHARED_STATE: SharedState = SharedState::new();
+
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     loop {}
