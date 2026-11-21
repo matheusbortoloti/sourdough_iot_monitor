@@ -15,7 +15,7 @@ use embassy_time::{Duration, Instant, Timer};
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
-use esp_hal::peripherals::{GPIO8, GPIO9, I2C0};
+use esp_hal::peripherals::{GPIO8, GPIO9, I2C0, WIFI};
 use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
@@ -92,99 +92,19 @@ async fn main(spawner: Spawner) {
     // Start the RTOS scheduler
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
+    // Start the sensor acquisition task.
     let token = sensor_task(peripherals.I2C0, peripherals.GPIO8, peripherals.GPIO9)
         .expect("Failed to create sensor task");
 
     spawner.spawn(token);
 
-    let network = match Network::initialize(peripherals.WIFI, &spawner).await {
-        Ok(network) => network,
-        Err(error) => {
-            println!("FATAL: {}", error);
-            loop {}
-        }
-    };
+    // Start the ThingSpeak upload task.
+    let token =
+        thingspeak_task(peripherals.WIFI, spawner).expect("Failed to create ThingSpeak task");
 
-    if let Err(error) = network.wait_for_dhcp().await {
-        println!("FATAL: {}", error);
-        loop {}
-    }
+    spawner.spawn(token);
 
-    let rng = sourdough_monitor::cloud::crypto_rng::initialize_tls_rng();
-
-    let tls = match Tls::new(rng) {
-        Ok(tls) => {
-            println!("TLS engine initialized successfully!");
-            tls
-        }
-        Err(error) => {
-            println!("FATAL: TLS initialization failed: {:?}", error);
-            loop {}
-        }
-    };
-
-    let thingspeak = ThingSpeak::new(network.stack());
-    let (rx_buffer, tx_buffer) = ThingSpeak::initialize_buffers();
-
-    println!("Connecting to ThingSpeak...");
-
-    let mut next_sample = Instant::now();
-    let mut next_upload = next_sample + Duration::from_millis(UPLOAD_INTERVAL_MS);
-
-    loop {
-        let now = Instant::now();
-
-        // Sensor sampling schedule
-        if now >= next_sample {
-            next_sample += Duration::from_millis(SAMPLE_INTERVAL_MS);
-
-            // Skip missed sampling deadlines rather than taking
-            // several measurements back-to-back
-            if next_sample <= now {
-                next_sample = now + Duration::from_millis(SAMPLE_INTERVAL_MS);
-            }
-        }
-
-        // ThingSpeak upload schedule
-        let now = Instant::now();
-
-        if now >= next_upload {
-            next_upload += Duration::from_millis(UPLOAD_INTERVAL_MS);
-
-            if next_upload <= now {
-                next_upload = now + Duration::from_millis(UPLOAD_INTERVAL_MS);
-            }
-
-            if let Some(readings) = SHARED_STATE.latest_readings() {
-                match thingspeak
-                    .upload_measurements(
-                        &tls,
-                        readings.relative_height_mm,
-                        readings.temperature_celsius,
-                        readings.humidity_percent,
-                        readings.tvoc_ppb,
-                        readings.co2_ppm,
-                        &mut rx_buffer[..],
-                        &mut tx_buffer[..],
-                    )
-                    .await
-                {
-                    Ok(entry_id) => {
-                        println!("ThingSpeak upload successful: {}", entry_id);
-                    }
-                    Err(error) => {
-                        println!("ThingSpeak upload failed: {:?}", error);
-                    }
-                }
-            } else {
-                println!("ThingSpeak upload skipped: no valid measurements yet.");
-            }
-        }
-
-        // Sleep until whichever event is scheduled next
-        let next_wakeup = core::cmp::min(next_sample, next_upload);
-        Timer::at(next_wakeup).await;
-    }
+    println!("Sourdough IoT Monitor started successfully!");
 }
 
 #[embassy_executor::task]
@@ -262,5 +182,92 @@ async fn sensor_task(i2c0: I2C0<'static>, sda: GPIO8<'static>, scl: GPIO9<'stati
         }
 
         Timer::at(next_sample).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn thingspeak_task(wifi: WIFI<'static>, spawner: Spawner) {
+    // Initialize the Wi-Fi network
+    let network = match Network::initialize(wifi, &spawner).await {
+        Ok(network) => {
+            println!("Network initialized successfully!");
+            network
+        }
+        Err(error) => {
+            println!("FATAL: Network initialization failed: {:?}", error);
+            halt();
+        }
+    };
+
+    // Wait until DHCP provides an IP address
+    if let Err(error) = network.wait_for_dhcp().await {
+        println!("FATAL: DHCP initialization failed: {:?}", error);
+        halt();
+    }
+
+    println!("Network connected successfully!");
+
+    // Initialize TLS.
+    let rng = sourdough_monitor::cloud::crypto_rng::initialize_tls_rng();
+
+    let tls = match Tls::new(rng) {
+        Ok(tls) => {
+            println!("TLS engine initialized successfully!");
+            tls
+        }
+        Err(error) => {
+            println!("FATAL: TLS initialization failed: {:?}", error);
+            halt();
+        }
+    };
+
+    // Initialize ThingSpeak
+    let thingspeak = ThingSpeak::new(network.stack());
+
+    let (rx_buffer, tx_buffer) = ThingSpeak::initialize_buffers();
+
+    println!("Connecting to ThingSpeak...");
+
+    // Schedule the first upload five minutes from now
+    let mut next_upload = Instant::now() + Duration::from_millis(UPLOAD_INTERVAL_MS);
+
+    loop {
+        let now = Instant::now();
+
+        if now >= next_upload {
+            next_upload += Duration::from_millis(UPLOAD_INTERVAL_MS);
+
+            // Skip missed upload deadlines
+            if next_upload <= now {
+                next_upload = now + Duration::from_millis(UPLOAD_INTERVAL_MS);
+            }
+
+            if let Some(readings) = SHARED_STATE.latest_readings() {
+                match thingspeak
+                    .upload_measurements(
+                        &tls,
+                        readings.relative_height_mm,
+                        readings.temperature_celsius,
+                        readings.humidity_percent,
+                        readings.tvoc_ppb,
+                        readings.co2_ppm,
+                        &mut rx_buffer[..],
+                        &mut tx_buffer[..],
+                    )
+                    .await
+                {
+                    Ok(entry_id) => {
+                        println!("ThingSpeak upload successful: {}", entry_id);
+                    }
+                    Err(error) => {
+                        println!("ThingSpeak upload failed: {:?}", error);
+                    }
+                }
+            } else {
+                println!("ThingSpeak upload skipped: no valid measurements yet.");
+            }
+        }
+
+        Timer::at(next_upload).await;
     }
 }
