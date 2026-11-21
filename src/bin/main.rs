@@ -15,6 +15,7 @@ use embassy_time::{Duration, Instant, Timer};
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
+use esp_hal::peripherals::{GPIO8, GPIO9, I2C0};
 use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
@@ -78,8 +79,6 @@ esp_bootloader_esp_idf::esp_app_desc!();
 )]
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
-    let mut delay = Delay::new();
-
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
@@ -92,6 +91,11 @@ async fn main(spawner: Spawner) {
 
     // Start the RTOS scheduler
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
+
+    let token = sensor_task(peripherals.I2C0, peripherals.GPIO8, peripherals.GPIO9)
+        .expect("Failed to create sensor task");
+
+    spawner.spawn(token);
 
     let network = match Network::initialize(peripherals.WIFI, &spawner).await {
         Ok(network) => network,
@@ -124,38 +128,8 @@ async fn main(spawner: Spawner) {
 
     println!("Connecting to ThingSpeak...");
 
-    let i2c = I2c::new(peripherals.I2C0, I2cConfig::default())
-        .unwrap()
-        .with_sda(peripherals.GPIO8)
-        .with_scl(peripherals.GPIO9);
-
-    let i2c_bus = RefCell::new(i2c);
-
-    let mut sensors = match sensors::initialize(&i2c_bus) {
-        Ok(sensors) => {
-            println!("All sensors initialized successfully!");
-            sensors
-        }
-        Err(error) => {
-            println!("FATAL: Sensor initialization failed: {:?}", error);
-            halt();
-        }
-    };
-
-    match sensors.vl6180x.establish_reference(&mut delay, 1000) {
-        Ok(distance) => {
-            println!("VL6180X reference distance: {} mm", distance);
-        }
-        Err(error) => {
-            println!("FATAL: Could not establish VL6180X reference: {:?}", error);
-            halt();
-        }
-    }
     let mut next_sample = Instant::now();
     let mut next_upload = next_sample + Duration::from_millis(UPLOAD_INTERVAL_MS);
-
-    // Keep the latest successful sensor readings
-    let mut latest_readings: Option<(f32, f32, f32, u16, u16)> = None;
 
     loop {
         let now = Instant::now();
@@ -169,26 +143,6 @@ async fn main(spawner: Spawner) {
             if next_sample <= now {
                 next_sample = now + Duration::from_millis(SAMPLE_INTERVAL_MS);
             }
-
-            match sensors::get_measurements(&mut sensors, &mut delay) {
-                Ok(readings) => {
-                    println!("Distance: {} mm", readings.relative_height_mm);
-                    println!("ENS160 TVOC: {} ppb", readings.ens160.tvoc_ppb);
-                    println!("AHT21: {:?}", readings.aht21);
-                    println!("SCD41 CO2: {} ppm", readings.scd41.co2_ppm);
-
-                    latest_readings = Some((
-                        readings.relative_height_mm,
-                        readings.aht21.temperature_calibrated,
-                        readings.aht21.humidity,
-                        readings.ens160.tvoc_ppb,
-                        readings.scd41.co2_ppm,
-                    ));
-                }
-                Err(error) => {
-                    println!("Measurement error: {:?}", error);
-                }
-            }
         }
 
         // ThingSpeak upload schedule
@@ -201,15 +155,15 @@ async fn main(spawner: Spawner) {
                 next_upload = now + Duration::from_millis(UPLOAD_INTERVAL_MS);
             }
 
-            if let Some((distance, temperature, humidity, tvoc, scd41)) = latest_readings {
+            if let Some(readings) = SHARED_STATE.latest_readings() {
                 match thingspeak
                     .upload_measurements(
                         &tls,
-                        distance,
-                        temperature,
-                        humidity,
-                        tvoc,
-                        scd41,
+                        readings.relative_height_mm,
+                        readings.temperature_celsius,
+                        readings.humidity_percent,
+                        readings.tvoc_ppb,
+                        readings.co2_ppm,
                         &mut rx_buffer[..],
                         &mut tx_buffer[..],
                     )
@@ -230,5 +184,83 @@ async fn main(spawner: Spawner) {
         // Sleep until whichever event is scheduled next
         let next_wakeup = core::cmp::min(next_sample, next_upload);
         Timer::at(next_wakeup).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn sensor_task(i2c0: I2C0<'static>, sda: GPIO8<'static>, scl: GPIO9<'static>) {
+    // Initialize the I²C peripheral.
+    let i2c = I2c::new(i2c0, I2cConfig::default())
+        .unwrap()
+        .with_sda(sda)
+        .with_scl(scl);
+
+    // The bus and all sensor drivers live inside this task
+    let i2c_bus = RefCell::new(i2c);
+
+    let mut sensors = match sensors::initialize(&i2c_bus) {
+        Ok(sensors) => {
+            println!("All sensors initialized successfully!");
+            sensors
+        }
+        Err(error) => {
+            println!("FATAL: Sensor initialization failed: {:?}", error);
+            halt();
+        }
+    };
+
+    // Initialize the delay required by the sensor drivers
+    let mut delay = Delay::new();
+
+    // Establish the VL6180X reference
+    match sensors.vl6180x.establish_reference(&mut delay, 2000) {
+        Ok(distance) => {
+            println!("VL6180X reference distance: {} mm", distance);
+        }
+        Err(error) => {
+            println!("FATAL: Could not establish VL6180X reference: {:?}", error);
+            halt();
+        }
+    }
+
+    // Preserve the existing sampling schedule
+    let mut next_sample = Instant::now();
+
+    loop {
+        let now = Instant::now();
+
+        if now >= next_sample {
+            next_sample += Duration::from_millis(SAMPLE_INTERVAL_MS);
+
+            // Skip missed deadlines instead of taking measurements
+            // back-to-back
+            if next_sample <= now {
+                next_sample = now + Duration::from_millis(SAMPLE_INTERVAL_MS);
+            }
+
+            match sensors::get_measurements(&mut sensors, &mut delay) {
+                Ok(readings) => {
+                    println!("Distance: {} mm", readings.relative_height_mm);
+                    println!("ENS160 TVOC: {} ppb", readings.ens160.tvoc_ppb);
+                    println!("AHT21: {:?}", readings.aht21);
+                    println!("SCD41 CO2: {} ppm", readings.scd41.co2_ppm);
+
+                    let latest = LatestReadings {
+                        relative_height_mm: readings.relative_height_mm,
+                        temperature_celsius: readings.aht21.temperature_calibrated,
+                        humidity_percent: readings.aht21.humidity,
+                        tvoc_ppb: readings.ens160.tvoc_ppb,
+                        co2_ppm: readings.scd41.co2_ppm,
+                    };
+
+                    SHARED_STATE.update(latest);
+                }
+                Err(error) => {
+                    println!("Measurement error: {:?}", error);
+                }
+            }
+        }
+
+        Timer::at(next_sample).await;
     }
 }
